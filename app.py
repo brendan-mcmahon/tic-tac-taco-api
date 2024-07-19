@@ -1,11 +1,11 @@
+import os
 from flask import Flask, request  # Make sure 'request' is imported here
-
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from name_generator import generate_menu_item
 from check_winner import check_winner
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 clients = {}
@@ -117,5 +117,6 @@ def on_rematch(data):
     games[game_id]['winningCombination'] = None
     emit('gameState', games[game_id], room=game_id)
 
-if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0')
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
