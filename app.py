@@ -117,11 +117,14 @@ def on_leave_game(data):
 def on_rematch(data):
     game_id = data.get('gameId')
     player = data.get('player')
+    otherPlayer = next(player for player in games[game_id]['players'] if player['id'] != player['id'])
     games[game_id]['board'] = [None]*9
     games[game_id]['currentPlayerId'] = player['id']
     games[game_id]['status'] = 'playing'
     games[game_id]['winner'] = None
     games[game_id]['winningCombination'] = None
+    games[game_id]['playerMoves'] = {player['id']: [], otherPlayer['id']: []}
+    games[game_id]['isTieGame'] = False
     emit('gameState', games[game_id], room=game_id)
 
 if __name__ == "__main__":
