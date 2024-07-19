@@ -16,4 +16,4 @@ def new_word(part):
 def generate_menu_item():
     global current_words
     current_words = {part: new_word(part) for part in possible_words}
-    return f"{current_words['adjective']} {current_words['prefix']}{current_words['suffix']} {current_words['postword']}"
+    return f"{current_words['adjective']}-{current_words['prefix']}{current_words['suffix']}-{current_words['postword']}"

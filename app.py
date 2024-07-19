@@ -1,12 +1,15 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
-from flask import Flask, request  # Make sure 'request' is imported here
+from flask import Flask, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from name_generator import generate_menu_item
 from check_winner import check_winner
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
 
 clients = {}
 games = {}
@@ -31,18 +34,21 @@ def test_disconnect():
         print(f"Client disconnected: {player_name}")
         emit('playerDisconnected', {'player_name': player_name}, room=game_id)
 
-
 @socketio.on('makeMove')
 def handle_move(data):
     game_id = data.get('gameId')
     player_id = data.get('playerId')
     index = data.get('index')
-    print("bug", data)
     if game_id in games:
         games[game_id]['board'][index] = player_id
+        games[game_id]['playerMoves'][player_id].append(index)
+        print ("player moves", games[game_id]['playerMoves'])
+        if len(games[game_id]['playerMoves'][player_id]) == 4:
+            removeIndex = games[game_id]['playerMoves'][player_id].pop(0)
+            games[game_id]['board'][removeIndex] = None
+            print("removed", games[game_id]['board'])
         games[game_id]['currentPlayerId'] = next(player for player in games[game_id]['players'] if player['id'] != player_id)['id']
         gameOver = check_winner(games[game_id]['board'])
-        print(gameOver)
         
         if (gameOver is not None) or (None not in games[game_id]['board']):
             if (gameOver == "tie game"):
@@ -60,7 +66,6 @@ def on_create(data):
     game_id = generate_menu_item()
     player = data.get('player')
     player['icon'] = 'x'
-    print('player', player)
     session_id = request.sid
     games[game_id] = {
         'id': game_id, 
@@ -69,7 +74,8 @@ def on_create(data):
         'currentPlayerId': player['id'],
         'status': 'waiting',
         'winner': None,
-        'winningCombination': None
+        'winningCombination': None,
+        'playerMoves': {player['id']: []}
     }
     clients[session_id]['player'] = player
     clients[session_id]['game_id'] = game_id
@@ -89,6 +95,7 @@ def on_join(data):
         player['icon'] = 'o'
         games[game_id]['players'].append(player)
         games[game_id]['status'] = 'playing'
+        games[game_id]['playerMoves'][player['id']] = []
     clients[session_id]['player'] = player
     clients[session_id]['game_id'] = game_id
     join_room(game_id)
@@ -119,4 +126,4 @@ def on_rematch(data):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    socketio.run(app, host='0.0.0.0', port=port)
