@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f2f2f2; }
+        #log { 
+            margin-top: 20px; 
+            background-color: #f9f9f9; 
+            border: 1px solid #ddd; 
+            padding: 10px; 
+            height: 150px; 
+            overflow-y: scroll; 
+            white-space: pre-wrap; 
+            font-family: monospace;
+        }
+    </style>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            var socket = io();
+
+            socket.on('update_dashboard', function(data) {
+                updateClientsTable(data.clients);
+                updateGamesTable(data.games);
+            });
+
+            socket.on('log', function(message) {
+                var logElement = document.getElementById('log');
+                logElement.innerHTML += message + "\n";
+                logElement.scrollTop = logElement.scrollHeight;
+            });
+
+            function updateClientsTable(clients) {
+                var clientsHTML = "<table><tr><th>Client ID</th><th>Player Name</th><th>Player ID</th><th>Game ID</th></tr>";
+                for (var key in clients) {
+                    if (clients.hasOwnProperty(key)) {
+                        var player = clients[key].player;
+                        var playerName = player ? player.name : "None";
+                        var playerId = player ? player.id : "None";
+                        clientsHTML += "<tr><td>" + key + "</td><td>" + playerName + "</td><td>" + playerId + "</td><td>" + (clients[key].game_id || "None") + "</td></tr>";
+                    }
+                }
+                clientsHTML += "</table>";
+                document.getElementById('clientsData').innerHTML = clientsHTML;
+            }
+
+            function updateGamesTable(games) {
+                var gamesHTML = "<table><tr><th>Game ID</th><th>Players</th><th>Status</th><th>Current Player</th></tr>";
+                for (var key in games) {
+                    if (games.hasOwnProperty(key)) {
+                        var playersList = games[key].players.map(player => player.name).join(", ");
+                        gamesHTML += "<tr><td>" + key + "</td><td>" + playersList + "</td><td>" + games[key].status + "</td><td>" + games[key].currentPlayerId + "</td></tr>";
+                    }
+                }
+                gamesHTML += "</table>";
+                document.getElementById('gamesData').innerHTML = gamesHTML;
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Dashboard</h1>
+    <h2>Clients</h2>
+    <div id="clientsData">Waiting for client data...</div>
+    <h2>Games</h2>
+    <div id="gamesData">Waiting for game data...</div>
+    <h2>Logs</h2>
+    <div id="log">Waiting for logs...</div>
+</body>
+</html>

@@ -2,7 +2,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
-from flask import Flask
+from flask import Flask, render_template
 from flask_socketio import SocketIO
 from events import setup_socket_events 
 
@@ -17,7 +17,7 @@ setup_socket_events(socketio)
 
 @app.route('/')
 def index():
-    return "Tac Server is running!"
+    return render_template('dashboard.html')
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

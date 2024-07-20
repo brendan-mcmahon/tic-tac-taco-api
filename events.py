@@ -2,10 +2,18 @@ from flask_socketio import emit, join_room, leave_room
 from flask import request
 from game_logic import initialize_game, handle_move, add_player_to_game, games, clients
 
+def update_dashboard():
+    emit('update_dashboard', {'clients': clients, 'games': games}, broadcast=True)
+
+def log(message):
+    emit('log', message, broadcast=True)
+
 def connect():
     session_id = request.sid
     clients[session_id] = {'player': None, 'game_id': None}
     print('Client connected', session_id)
+    log(f"Client connected: {session_id}")
+    update_dashboard()
         
 def disconnect():
     session_id = request.sid
@@ -15,16 +23,19 @@ def disconnect():
         player_name = player_info['player']['name']
         print(f"Client disconnected: {player_name}")
         emit('playerDisconnected', {'player_name': player_name}, room=game_id)
+        update_dashboard()
         
 def create_game(data):
     player = data.get('player')
+    log(f"Creating game for player: {player['name']}")
     game = initialize_game(player)
-    add_player_to_game(game, player)
+    log(f"Game initialized: {game['id']}")
     session_id = request.sid
     games[game['id']] = game
     clients[session_id] = {'player': player, 'game_id': game['id']}
     join_room(game['id'])
     emit('gameState', game, room=game['id'])
+    update_dashboard()
 
 def join_game(data):
     session_id = request.sid
@@ -34,18 +45,22 @@ def join_game(data):
     
     if not game:
         emit('gameNotFound', room=session_id)
+        log(f"Game not found: {game_id}")
         return
         
     if len(game['players']) >= 2:
         emit('gameFull', room=game_id)
+        log(f"Game is full: {game_id}")
         return
     
     add_player_to_game(game, player)
+    log(f"Player {player['name']} joined game {game_id}")
     
     clients[session_id] = {'player': player, 'game_id': game['id']}
 
     join_room(game_id)
     emit('gameState', games[game_id], room=game_id)
+    update_dashboard()
     
 def make_move(data):
     game_id = data.get('gameId')
@@ -54,6 +69,7 @@ def make_move(data):
     if game_id in games:
         handle_move(index, game_id, player_id)
         emit('gameState', games[game_id], room=game_id)
+    update_dashboard()
 
 def leave_game():
     sid = request.sid
@@ -61,6 +77,7 @@ def leave_game():
     games.pop(game_id)
     emit('gameDeleted', room=game_id)
     leave_room(game_id)
+    update_dashboard()
         
 def rematch(data):
     game_id = data.get('gameId')
@@ -89,6 +106,7 @@ def rematch(data):
         games[game_id]['isTieGame'] = False
 
         emit('gameState', games[game_id], room=game_id)
+        update_dashboard()
     except Exception as e:
         print(f"Error during rematch: {e}")
         emit('error', {'message': 'Failed to setup rematch.'}, room=game_id)
