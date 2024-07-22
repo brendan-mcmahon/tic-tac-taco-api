@@ -19,10 +19,7 @@ def disconnect():
     session_id = request.sid
     player_info = clients.pop(session_id, None)
     if player_info and player_info['game_id'] and player_info['player']:
-        game_id = player_info['game_id']
-        player_name = player_info['player']['name']
-        print(f"Client disconnected: {player_name}")
-        emit('playerDisconnected', {'player_name': player_name}, room=game_id)
+        leave_game()
         update_dashboard()
         
 def create_game(data):
