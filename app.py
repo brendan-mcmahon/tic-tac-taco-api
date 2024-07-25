@@ -10,9 +10,6 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
 
-clients = {}
-games = {}
-
 setup_socket_events(socketio)
 
 @app.route('/')

@@ -1,126 +1,139 @@
-from flask_socketio import emit, join_room, leave_room
 from flask import request
-from game_logic import initialize_game, handle_move, add_player_to_game, games, clients
+from flask_socketio import join_room, leave_room, emit
+
+from game import Game
+from game_manager import GameManager
+from player import Player
+
+from functools import wraps
+
+game_manager = GameManager()
 
 def update_dashboard():
-    emit('update_dashboard', {'clients': clients, 'games': games}, broadcast=True)
+    clients_json = {client_id: client.to_json() for client_id, client in game_manager.clients.items()}
+    games_json = {game_id: game.to_json() for game_id, game in game_manager.games.items()}
+    emit('update_dashboard', {'clients': clients_json, 'games': games_json}, broadcast=True)
 
-def log(message):
+def log(message: str):
     emit('log', message, broadcast=True)
+    
+def emitGame(game: Game):
+    _game = game.to_json() if game else None
+    room = request.sid if game is None else game.id
+    emit('gameState', _game, room=room)
 
-def connect():
+def emitError(message: str):
+    emit('error', {'message': message}, room=request.sid)
+    
+def log_and_update_dashboard(event):
+    def decorator(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            result = func(*args, **kwargs)
+            update_dashboard()
+            log(f"{event}: {result}")
+            return result
+        return wrapped
+    return decorator
+
+@log_and_update_dashboard("Client Connected")
+def connect(*args, **kwargs):
     session_id = request.sid
-    clients[session_id] = {'player': None, 'game_id': None}
-    print('Client connected', session_id)
-    log(f"Client connected: {session_id}")
-    update_dashboard()
-        
-def disconnect():
+    game_manager.add_client(session_id, None, None)
+    return session_id
+
+@log_and_update_dashboard("Client Disconnected")
+def disconnect(*args, **kwargs):
     session_id = request.sid
-    player_info = clients.pop(session_id, None)
-    if player_info and player_info['game_id'] and player_info['player']:
+    player = game_manager.get_player_from_session(session_id)
+    if player:
         leave_game()
-        update_dashboard()
+        return player.name
         
+@log_and_update_dashboard("Game Created")
 def create_game(data):
-    player = data.get('player')
-    log(f"Creating game for player: {player['name']}")
-    game = initialize_game(player)
-    log(f"Game initialized: {game['id']}")
+    player = Player(data.get("player"))
+    player.icon = "x"
     session_id = request.sid
-    games[game['id']] = game
-    clients[session_id] = {'player': player, 'game_id': game['id']}
-    join_room(game['id'])
-    emit('gameState', game, room=game['id'])
-    update_dashboard()
+    game = game_manager.initialize_game(player)
+    game_manager.set_client(session_id, player, game.id)
+    join_room(game.id)
+    emitGame(game)
+    return f"Game for player {player.name} initialized with ID {game.id}"
 
+@log_and_update_dashboard("Game Joined")
 def join_game(data):
     session_id = request.sid
-    game_id = data.get('gameId')
-    player = data.get('player')
-    game = games.get(game_id)
+    game_id = data.get("gameId")
+    player = Player(data.get("player"))
+    game = game_manager.get_game(game_id)
     
     if not game:
-        emit('gameNotFound', room=session_id)
-        log(f"Game not found: {game_id}")
-        return
+        emitError("gameNotFound")
+        return "Game not found" + game_id
         
-    if len(game['players']) >= 2:
-        emit('gameFull', room=game_id)
-        log(f"Game is full: {game_id}")
-        return
+    if len(game.players) >= 2:
+        emitError("gameFull")
+        return "Game is full" + game_id
     
-    add_player_to_game(game, player)
-    log(f"Player {player['name']} joined game {game_id}")
+    game.add_player(player)
     
-    clients[session_id] = {'player': player, 'game_id': game['id']}
+    game_manager.set_client(session_id, player, game.id)
 
     join_room(game_id)
-    emit('gameState', games[game_id], room=game_id)
-    update_dashboard()
+    emitGame(game)
+    return f"Player {player.name} joined game {game_id}"
     
+@log_and_update_dashboard("Make Move")
 def make_move(data):
-    game_id = data.get('gameId')
-    player_id = data.get('playerId')
-    index = data.get('index')
-    if game_id in games:
-        handle_move(index, game_id, player_id)
-        emit('gameState', games[game_id], room=game_id)
-    update_dashboard()
+    game_id = data.get("gameId")
+    player_id = data.get("playerId")
+    index = data.get("index")
+    game = game_manager.get_game(game_id)
+    game.handle_move(index, player_id)
+    emitGame(game)
+    return f"Player {player_id} moved to {index} in game {game_id}"
 
-def leave_game():
+@log_and_update_dashboard("Leave Game")
+def leave_game(*args, **kwargs):
     sid = request.sid
-    game_id = clients[sid]['game_id']
-    games.pop(game_id)
-    emit('gameDeleted', room=game_id)
+    game_id = game_manager.clients[sid].game_id
+    game_manager.remove_game(game_id)
+    emitGame(None)
     leave_room(game_id)
-    update_dashboard()
-        
-def rematch(data):
-    game_id = data.get('gameId')
-    if game_id not in games:
-        emit('error', {'message': 'Game not found.'}, room=request.sid)
-        return
-    
-    player = data.get('player')
-    if not player:
-        emit('error', {'message': 'Player data is missing.'}, room=request.sid)
-        return
+    return f"Player left game {game_id}"
 
-    if not any(p['id'] == player['id'] for p in games[game_id]['players']):
-        emit('error', {'message': 'Player not part of the game.'}, room=request.sid)
-        return
+@log_and_update_dashboard("Rematch")
+def rematch(data):
+    game_id = data.get("gameId")
+    game = game_manager.get_game(game_id)
+    if game is None:
+        emitError("Game not found.")
+        return "Game not found" + game_id
+    
+    player = Player(data.get("player"))
+    if not player:
+        emitError("Player data is missing.")
+        return "Player data is missing"
+
+    if not any(p.id == player.id for p in game.players):
+        emitError("Player not part of the game.")
+        return "Player not part of the game" + player.id
 
     try:
-        otherPlayer = next(p for p in games[game_id]['players'] if p['id'] != player['id'])
-        games[game_id]['board'] = [None]*9
-        games[game_id]['currentPlayerId'] = player['id']
-        games[game_id]['status'] = 'playing'
-        games[game_id]['winner'] = None
-        games[game_id]['winningCombination'] = None
-        games[game_id]['playerMoves'][player['id']] = []
-        games[game_id]['playerMoves'][otherPlayer['id']] = []
-        games[game_id]['isTieGame'] = False
-
-        emit('gameState', games[game_id], room=game_id)
-        update_dashboard()
+        game.reset_game(player)
+        emitGame(game)
+        return "Rematch setup successfully" + game_id
     except Exception as e:
         print(f"Error during rematch: {e}")
-        emit('error', {'message': 'Failed to setup rematch.'}, room=game_id)
-
+        emitError("Failed to setup rematch.")
+        return "Failed to setup rematch" + game_id
 
 def setup_socket_events(socketio):
-    @socketio.on('connect')
-    def on_connect(): connect()
-    @socketio.on('disconnect')
-    def on_disconnect(): disconnect()
-    @socketio.on('createGame')
-    def on_create(data): create_game(data)
-    @socketio.on('joinGame')
-    def on_join(data): join_game(data)
-    @socketio.on('makeMove')
-    def on_make_move(data): make_move(data)
-    @socketio.on('leaveGame')
-    def on_leave_game(data): leave_game()
-    @socketio.on('rematch')
-    def on_rematch(data): rematch(data)
+    socketio.on("connect")(connect)
+    socketio.on("disconnect")(disconnect)
+    socketio.on("createGame")(create_game)
+    socketio.on("joinGame")(join_game)
+    socketio.on("makeMove")(make_move)
+    socketio.on("leaveGame")(leave_game)
+    socketio.on("rematch")(rematch)
